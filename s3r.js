@@ -133,12 +133,19 @@ class Polygon_Triangulation {
          */
         iterate_from_self(fn) {
             let it = this;
+            let natural_end = true;
             do {
                 if (fn(it) === false) {
+                    natural_end = false;
                     break;
                 }
                 it = it.__nxt;
             } while (it !== this);
+            if (natural_end) {
+                return null;
+            }
+            //不是自然结束的，就返回非自然结束的那个节点
+            return it;
         }
 
         static Init_list_from_arr(arr) {
@@ -168,13 +175,19 @@ class Polygon_Triangulation {
         cached.v1.set_from_to(cached_arr[1], cached_arr[2]);
 
         //确定方向
-        let sign = cached.v0.cross_product(cached.v1) <= 0;
-
+        let sign = cached.v0.cross_product(cached.v1) < 0;
+        let prod = 0;
         for (let i = 0; i < 3; i++) {
             cached.v0.set_from_to(cached_arr[i], cached_arr[(i + 1) % 3]);
             //判断前后
             cached.v.set_from_to(cached_arr[i], p);
-            if ((cached.v0.cross_product(cached.v) <= 0) !== sign) {
+            prod = cached.v0.cross_product(cached.v);
+            if (prod === 0) {
+                //在边界上也算在三角形上
+                //如果在边界不算在三角形上的话，会出现Glitch, 运算结果不符合的情况
+                return true;
+            }
+            if ((cached.v0.cross_product(cached.v) < 0) !== sign) {
                 return false;
             }
         }
@@ -341,8 +354,6 @@ class Polygon_Triangulation {
         //复制两个node
         let node0_copy = new Polygon_Triangulation.List_Node(node0.val);
         let node1_copy = new Polygon_Triangulation.List_Node(node1.val);
-        node0_copy.is_copy_of = node0;
-        node1_copy.is_copy_of = node1;
         node0.alias = node0_copy;
         node1.alias = node1_copy;
         node0_copy.alias = node0;
@@ -421,7 +432,6 @@ class Polygon_Triangulation {
             });
             //计算交点并且牵红线
             if (min_distance_ret.node !== null) {
-                console.log("intersect", min_distance_ret);
                 if (min_distance_ret.is_end_pnt) {
                     //直接牵线
                     Polygon_Triangulation.__Mix_diff_nodes_list(min_distance_ret.node, min_x_node);
@@ -471,6 +481,7 @@ class Polygon_Triangulation {
 
         // return poly;
         //开始三角化
+        let ear_node = null;
         let go_pre = false;
         let has_pnt_in_triangle = false;
         let result_triangles = [];
@@ -486,43 +497,53 @@ class Polygon_Triangulation {
                 //顶点数量小于3，算法结束
                 break;
             }
-            //对于此顶点，观察与周围的两个顶点组合，是否成为凸顶点
-            this.__Cached.v0.set_from_to(it_node.__pre.val, it_node.val);
-            this.__Cached.v1.set_from_to(it_node.val, it_node.__nxt.val);
-            if ((this.__Cached.v0.cross_product(this.__Cached.v1) <= 0) === none_hole_winding_sign) {
-                //找到凸三角形
-                //遍历保证没有顶点落在里面
-                has_pnt_in_triangle = false;
-                it_node.__nxt.__nxt.iterate_from_self((node) => {
-                    if (node === it_node.__pre) {
-                        //结束
-                        return false;
-                    }
-                    if (node.alias === it_node || node.alias === it_node.__pre || node.alias === it_node.__nxt) {
-                        //跳过
-                        return;
-                    }
-                    //是否在三角形内
-                    if (Polygon_Triangulation.Is_in_triangle(node.val, it_node.__pre.val, it_node.val, it_node.__nxt.val)) {
-                        has_pnt_in_triangle = true;
-                        return false;
-                    }
-                });
-                if (has_pnt_in_triangle) {
-                    //此顶点不满足要求，下一个
-                } else {
-                    //加入三角形
-                    result_triangles.push(it_node.__pre.val, it_node.val, it_node.__nxt.val);
-                    //移除此顶点
-                    if (go_pre) {
-                        it_node = it_node.remove_self().__pre.__pre;
+            ear_node = it_node.iterate_from_self((node_outer) => {
+                //对于此顶点，观察与周围的两个顶点组合，是否成为凸顶点
+                this.__Cached.v0.set_from_to(node_outer.__pre.val, node_outer.val);
+                this.__Cached.v1.set_from_to(node_outer.val, node_outer.__nxt.val);
+                if ((this.__Cached.v0.cross_product(this.__Cached.v1) <= 0) === none_hole_winding_sign) {
+                    //找到凸三角形
+                    //遍历保证没有顶点落在里面
+                    has_pnt_in_triangle = false;
+                    node_outer.__nxt.__nxt.iterate_from_self((node) => {
+                        if (node === node_outer.__pre) {
+                            //结束
+                            return false;
+                        }
+                        if (node.alias === node_outer || node.alias === node_outer.__pre || node.alias === node_outer.__nxt) {
+                            //跳过
+                            return;
+                        }
+                        //是否在三角形内
+                        if (Polygon_Triangulation.Is_in_triangle(node.val, node_outer.__pre.val, node_outer.val, node_outer.__nxt.val)) {
+                            has_pnt_in_triangle = true;
+                            //有三角形就跳过
+                            return false;
+                        }
+                    });
+                    if (has_pnt_in_triangle) {
+                        //此顶点不满足要求，下一个
                     } else {
-                        it_node = it_node.remove_self().__pre;
+                        //找到合适的ear三角形
+                        //提前退出
+                        return false;
                     }
-                    go_pre = !go_pre;
                 }
+            });
+            if (ear_node === null) {
+                //异常结束
+                console.warn("Triangulate_EC异常结束: 多边形有重叠, 结果可能不尽人意");
+                break;
+            } else {
+                result_triangles.push(ear_node.__pre.val, ear_node.val, ear_node.__nxt.val);
+                //移除此顶点
+                if (go_pre) {
+                    it_node = ear_node.remove_self().__pre;
+                } else {
+                    it_node = ear_node.remove_self();
+                }
+                go_pre = !go_pre;
             }
-            it_node = it_node.__nxt;
         }
         return result_triangles;
     }
