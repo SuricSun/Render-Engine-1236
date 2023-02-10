@@ -138,12 +138,13 @@ class Matrix4x4 {
 
         for (let c = 0; c < 4; c++) {
             for (let r = 0; r < 4; r++) {
-                o[c * 4 + r] = Math.pow(-1, c + r) * this.determinant_order_3(c, r);
+                //伴随矩阵需要转置一下，这里注意下标
+                o[r * 4 + c] = Math.pow(-1, c + r) * this.determinant_order_3(c, r);
             }
         }
 
         //计算这个4x4矩阵的行列式
-        let determinant = d[0] * o[0] + d[1] * o[1] + d[2] * o[2] + d[3] * o[3];
+        let determinant = d[0] * o[0] + d[1] * o[4] + d[2] * o[8] + d[3] * o[12];
 
         if (determinant === 0) {
             //没有行列式

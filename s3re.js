@@ -161,7 +161,7 @@ class S3R_Extend extends Simple_3D_Renderer {
         transform: new Transform(),
         transform_pos_data: new Float32Array(4),
         projection_matrix: new Matrix4x4(),
-        camera_inv_trans: new Matrix4x4(),
+        camera_inv: new Matrix4x4(),
         mat_vp: new Matrix4x4()
     };
 
@@ -224,8 +224,8 @@ class S3R_Extend extends Simple_3D_Renderer {
 
         if (this.__camera.transform.need_update()) {
             this.__camera.transform.update_transform_matrix();
-            this.__camera.transform.__transform_mat.inverse_transpose(this.__camera.camera_inv_trans);
-            this.__camera.projection_matrix.multiply4x4(this.__camera.camera_inv_trans, this.__camera.mat_vp);
+            this.__camera.transform.__transform_mat.inverse(this.__camera.camera_inv);
+            this.__camera.projection_matrix.multiply4x4(this.__camera.camera_inv, this.__camera.mat_vp);
             S3R_Utility.Array_Copy(this.__camera.transform.__translation, 0, this.__camera.transform_pos_data, 0, Infinity, true);
         }
     }
@@ -295,7 +295,7 @@ class S3R_Extend extends Simple_3D_Renderer {
               #define MAGIC_NUMBER 1.2364
 
               uniform vec4 u_vec4_color;
-              uniform mat4 u_mat4_m_inv_trans; // 到物体坐标系
+              uniform mat4 u_mat4_m_inv; // 到物体坐标系
               uniform vec4 s3re_u_vec4_camera_pos_world;
               uniform vec4 s3re_u_vec4_p_light_pos_world;
               uniform float s3re_u_float_p_light_length;
@@ -308,8 +308,8 @@ class S3R_Extend extends Simple_3D_Renderer {
               void main() {
 
                 //转换到物体
-                vec3 point_light_pos_object = (u_mat4_m_inv_trans * s3re_u_vec4_p_light_pos_world).xyz;
-                vec3 camera_pos_object = (u_mat4_m_inv_trans * s3re_u_vec4_camera_pos_world).xyz;
+                vec3 point_light_pos_object = (u_mat4_m_inv * s3re_u_vec4_p_light_pos_world).xyz;
+                vec3 camera_pos_object = (u_mat4_m_inv * s3re_u_vec4_camera_pos_world).xyz;
                 //计算direction
                 vec3 light_direction = point_light_pos_object - f_vec4_pos_object.xyz;
                 vec3 view_direction = normalize(camera_pos_object - f_vec4_pos_object.xyz);
@@ -338,7 +338,7 @@ class S3R_Extend extends Simple_3D_Renderer {
             },
             uniform: {
                 u_mat4_m: SL_Type_Mat4, // 到世界坐标系
-                u_mat4_m_inv_trans: SL_Type_Mat4, // 到物体坐标系
+                u_mat4_m_inv: SL_Type_Mat4, // 到物体坐标系
                 u_vec4_color: SL_Type_Vec4,
                 s3re_u_mat4_vp: SL_Type_Mat4,// 到相机坐标系再到裁剪空间(GPU会自动做透视除法转换到NDC坐标系)
                 s3re_u_vec4_camera_pos_world: SL_Type_Vec4,
