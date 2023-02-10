@@ -32,6 +32,14 @@ class Vector4 {
         return this.__data;
     }
 
+    set_xyzw(x, y, z, w) {
+
+        this.__data[0] = x;
+        this.__data[1] = y;
+        this.__data[2] = z;
+        this.__data[3] = w;
+    };
+
     copy_from(vec4) {
 
         this.__data[0] = vec4.data[0];
@@ -49,7 +57,12 @@ class Vector4 {
     }
 }
 
+/**
+ * Column Major Matrix
+ */
 class Matrix4x4 {
+
+    static __temp_data = new Float32Array(16);
 
     __data = new Float32Array(16);
 
@@ -69,7 +82,7 @@ class Matrix4x4 {
      * @param in4x4
      * @param out4x4
      */
-    multiply(in4x4, out4x4) {
+    multiply4x4(in4x4, out4x4) {
 
         // column major
         // x  y  z  w
@@ -107,6 +120,114 @@ class Matrix4x4 {
         o[15] = l[3] * r[12] + l[7] * r[13] + l[11] * r[14] + l[15] * r[15];
     }
 
+    multiply4(in4, out4) {
+
+        let l = this.__data;
+        let r = in4.__data;
+        let o = out4.__data;
+
+        o[0] = l[0] * r[0] + l[4] * r[1] + l[8] * r[2] + l[12] * r[3];
+        o[1] = l[1] * r[0] + l[5] * r[1] + l[9] * r[2] + l[13] * r[3];
+        o[2] = l[2] * r[0] + l[6] * r[1] + l[10] * r[2] + l[14] * r[3];
+        o[3] = l[3] * r[0] + l[7] * r[1] + l[11] * r[2] + l[15] * r[3];
+    }
+
+    inverse(out4x4) {
+
+        //计算伴随矩阵
+        let d = this.__data;
+        let o = out4x4.__data;
+
+        for (let c = 0; c < 4; c++) {
+            for (let r = 0; r < 4; r++) {
+                o[c * 4 + r] = Math.pow(-1, c + r) * this.determinant_order_3(c, r);
+            }
+        }
+
+        //计算这个4x4矩阵的行列式
+        let determinant = d[0] * o[0] + d[1] * o[1] + d[2] * o[2] + d[3] * o[3];
+
+        if (determinant === 0) {
+            //没有行列式
+            throw new Error("无逆矩阵")
+        }
+
+        for (let i = 0; i < 16; i++) {
+            o[i] /= determinant;
+        }
+    }
+
+    transpose(out4x4) {
+
+        let d = this.__data;
+        let o = out4x4.__data;
+        for (let c = 0; c < 4; c++) {
+            for (let r = 0; r < 4; r++) {
+                o[r * 4 + c] = d[c * 4 + r];
+            }
+        }
+    }
+
+    transpose_self(out4x4) {
+
+        let d = this.__data;
+        let temp = 0;
+        for (let c = 0; c < 4; c++) {
+            for (let r = c; r < 4; r++) {
+                temp = d[r * 4 + c];
+                d[r * 4 + c] = d[c * 4 + r];
+                d[c * 4 + r] = temp;
+            }
+        }
+    }
+
+    inverse_transpose(out4x4) {
+
+        this.inverse(out4x4);
+        out4x4.transpose_self();
+    }
+
+    /**
+     * 专门用来计算3阶行列式的
+     */
+    determinant_order_3(ignore_column, ignore_row) {
+
+        let d = this.__data;
+        let product_a = 1;
+        let product_b = 1;
+        let sum = 0;
+        let cols_arr = [];
+        let rows_arr = [];
+        for (let i = 0; i < 4; i++) {
+            if (i !== ignore_column) {
+                cols_arr.push(i);
+            }
+            if (i !== ignore_row) {
+                rows_arr.push(i);
+            }
+        }
+        for (let col_idx = 0; col_idx < 3; col_idx++) {
+            product_a = product_b = 1;
+            for (let i = 0; i < 3; i++) {
+                product_a *= d[cols_arr[(col_idx + i) % 3] * 4 + rows_arr[i]];
+                product_b *= d[cols_arr[(col_idx + i) % 3] * 4 + rows_arr[2 - i]];
+            }
+            sum += product_a - product_b;
+        }
+
+        return sum;
+    }
+
+    get(c, r) {
+
+        return this.__data[c * 4 + r];
+    }
+
+    set(c, r, v) {
+
+        this.__data[c * 4 + r] = v;
+    }
+
     to_identity() {
 
         this.data[0] = 1.0;
@@ -139,48 +260,55 @@ class Matrix4x4 {
 
     clear_and_init_with_orthogonal(width, height, near, far) {
 
-        this.data[0] = 2.0 / width;
-        this.data[1] = 0.0;
-        this.data[2] = 0.0;
-        this.data[3] = 0.0;
+        let o = this.__data;
+        
+        o[0] = 2.0 / width;
+        o[1] = 0.0;
+        o[2] = 0.0;
+        o[3] = 0.0;
 
-        this.data[4] = 0.0;
-        this.data[5] = 2.0 / height;
-        this.data[6] = 0.0;
-        this.data[7] = 0.0;
+        o[4] = 0.0;
+        o[5] = 2.0 / height;
+        o[6] = 0.0;
+        o[7] = 0.0;
 
-        this.data[8] = 0.0;
-        this.data[9] = 0.0;
-        this.data[10] = 2.0 / Math.abs(far - near);
-        this.data[11] = 0.0;
+        o[8] = 0.0;
+        o[9] = 0.0;
+        o[10] = 2.0 / Math.abs(far - near);
+        o[11] = 0.0;
 
-        this.data[12] = 0.0;
-        this.data[13] = 0.0;
-        this.data[14] = -((far + near) / 2.0 * this.data[10]);
-        this.data[15] = 1.0;
+        o[12] = 0.0;
+        o[13] = 0.0;
+        o[14] = -((far + near) / (far - near));
+        o[15] = 1.0;
     }
 
-    clear_and_init_with_perspective(half_x, half_y, near, far) {
+    clear_and_init_with_perspective(near, far, fovy, aspect) {
 
-        this.data[0] = (2.0 * near) / (2.0 * half_x);
-        this.data[1] = 0.0;
-        this.data[2] = 0.0;
-        this.data[3] = 0.0;
+        let o = this.__data;
 
-        this.data[4] = 0.0;
-        this.data[5] = (2.0 * near) / (2.0 * half_y);
-        this.data[6] = 0.0;
-        this.data[7] = 0.0;
+        let f = 1.0 / Math.tan(fovy / 2);
+        let nf = 1 / (far - near);
 
-        this.data[8] = 0.0;
-        this.data[9] = 0.0;
-        this.data[10] = (far + near) / (far - near);
-        this.data[11] = 1.0;
+        o[0] = f / aspect;
+        o[1] = 0;
+        o[2] = 0;
+        o[3] = 0;
 
-        this.data[12] = 0.0;
-        this.data[13] = 0.0;
-        this.data[14] = (2.0 * near * far) / (near - far);
-        this.data[15] = 1.0;
+        o[4] = 0;
+        o[5] = f;
+        o[6] = 0;
+        o[7] = 0;
+
+        o[8] = 0;
+        o[9] = 0;
+        o[10] = (far + near) * nf;
+        o[11] = 1;
+
+        o[12] = 0;
+        o[13] = 0;
+        o[14] = -2 * far * near * nf;
+        o[15] = 0;
     }
 }
 
@@ -521,32 +649,10 @@ class __Mesh {
 
     mesh_name = "";
     attr_map = new Map();
-    vertex_cnt = 0;
-}
-
-class Batched_Ctx {
-
-    constructor(mesh) {
-
-        this.mesh_used = mesh;
-    }
-
-    mesh_used = null;
-    go_array = [];
-}
-
-class Per_Instance_Data {
-
-    __data_type_str = null;
-    __per_instance_data_name = null;
-    __typed_buffer = null;
-    __buffer_desc = null;
-
-    constructor(typed_array, elem_type, elem_offset, elem_length) {
-
-        this.__typed_buffer = typed_array;
-        this.__buffer_desc = new Array_Buffer_Desc(elem_type, elem_length, false, elem_length, elem_offset);
-    }
+    has_idx_buffer = false;
+    vertex_or_idx_cnt = 0;
+    cpu_idx_buffer = null;
+    gpu_idx_buffer = null;
 }
 
 class SL_Type {
@@ -559,6 +665,19 @@ class SL_Type {
         for (let i = 0; i < length; i++) {
             to[to_start + i] = from[from_start + i];
         }
+    }
+}
+
+/**
+ * Shading Language Type
+ */
+class SL_Type_Float {
+
+    data = new Float32Array(1);
+
+    copy_from(float32, from_start) {
+
+        SL_Type.Copy_Float32(float32, from_start, this.data, 0, this.data.length);
     }
 }
 
@@ -617,7 +736,8 @@ class Material {
 
     use_program(prog_name) {
 
-        this.__program_ctx_used = this.__s3r_belongs_to.__program_ctx_map[prog_name];
+        //TODO: 找不到报错
+        this.__program_ctx_used = this.__s3r_belongs_to.__program_ctx_map.get(prog_name);
     }
 
     use_mesh(mesh_name) {
@@ -681,6 +801,10 @@ class Graphics_obj extends Transform {
     setup_shader_and_data() {
 
         this.__material.__s3r_belongs_to.setup_program(this.__material.__program_ctx_used.program);
+        //set index buffer
+        if (this.__material.__mesh_used.has_idx_buffer) {
+            this.__material.__s3r_belongs_to.bind_global_idx_buffer(this.__material.__mesh_used.gpu_idx_buffer);
+        }
         //设置每顶点
         for (let per_vertex_attr_location_kv of this.__material.__program_ctx_used.per_vertex_attr_location_map) {
             if (this.__material.__mesh_used.attr_map.has(per_vertex_attr_location_kv[0])) {
@@ -726,7 +850,24 @@ class Simple_3D_Renderer {
         text_mesh_map: new Map()
     };
 
-    create_program_ctx(vs_code, fs_code, attr_desc) {
+    __config = {
+        clear_flag: 0,
+        clear_color: null,
+        clear_depth: 0
+    };
+
+    Constants = {
+
+        get CLEAR_COLOR_BUFFER() {
+            return 0b00000001;
+        },
+        get CLEAR_DEPTH_BUFFER() {
+
+            return 0b00000010;
+        }
+    };
+
+    create_program_ctx(ctx_name, vs_code, fs_code, attr_desc) {
 
         let ctx = new Program_Ctx();
         ctx.vs = this.create_shader(vs_code, this.__gl.VERTEX_SHADER);
@@ -753,6 +894,7 @@ class Simple_3D_Renderer {
             );
         }
 
+        this.__program_ctx_map.set(ctx_name, ctx);
         return ctx;
     }
 
@@ -770,6 +912,11 @@ class Simple_3D_Renderer {
         if (this.__gl === null) {
             throw new Error("无法获取webgl2上下文");
         }
+
+        //config
+        this.__config.clear_flag = this.__gl.COLOR_BUFFER_BIT | this.__gl.DEPTH_BUFFER_BIT;
+        this.__config.clear_color = [0.0, 0.0, 0.0, 0.0];
+        this.__config.clear_depth = 1.0;
 
         let vs = `
               precision mediump float;
@@ -800,6 +947,7 @@ class Simple_3D_Renderer {
         `;
 
         this.__default_program_ctx = this.create_program_ctx(
+            "s3r_default",
             vs,
             fs,
             {
@@ -814,8 +962,6 @@ class Simple_3D_Renderer {
                 per_instance: {}
             }
         );
-
-        this.__program_ctx_map["s3r_default"] = this.__default_program_ctx;
     }
 
     is_mesh_exist(mesh_name) {
@@ -832,15 +978,23 @@ class Simple_3D_Renderer {
         }
     }
 
-    create_mesh(mesh_name, vertex_cnt) {
+    create_mesh(mesh_name, has_idx, vertex_or_idx_cnt, idx_arr) {
 
         let new_mesh = new __Mesh(mesh_name);
         this.__static.mesh_map.set(mesh_name, new_mesh);
-        new_mesh.vertex_cnt = vertex_cnt;
-        //this.__batched_go_map[mesh_name] = new Batched_Ctx(this.__static.mesh_map[mesh_name]);
+        new_mesh.has_idx_buffer = has_idx;
+        new_mesh.vertex_or_idx_cnt = vertex_or_idx_cnt;
+        if (has_idx) {
+            //应该上传索引缓冲
+            let cpu_idx_buffer = new Uint16Array(idx_arr.length);
+            for (let i = 0; i < idx_arr.length; i++) {
+                cpu_idx_buffer[i] = idx_arr[i];
+            }
+            new_mesh.cpu_idx_buffer = cpu_idx_buffer;
+        }
     }
 
-    update_mesh_attribute(mesh_name, mesh_attr_name, arr, size, type, normalize, stride, offset) {
+    update_mesh_attribute(mesh_name, mesh_attr_name, arr, elem_type, elem_cnt_per_stride, whether_normalize, stride_cnt, offset_cnt) {
 
         if (this.is_mesh_attribute_exist(mesh_name, mesh_attr_name)) {
             throw new Error("mesh attr 已存在");
@@ -848,15 +1002,17 @@ class Simple_3D_Renderer {
         if (this.is_mesh_exist(mesh_name) === false) {
             throw new Error("mesh name 不存在");
         }
+        let mesh = this.__static.mesh_map.get(mesh_name);
         let mesh_attr = new __Mesh_Attr(mesh_attr_name);
-        this.__static.mesh_map.get(mesh_name).attr_map.set(mesh_attr_name, mesh_attr);
+        mesh.attr_map.set(mesh_attr_name, mesh_attr);
         // need 大改
+        //上传cpu缓冲
         let cpu_buffer = new Float32Array(arr.length);
         for (let i = 0; i < arr.length; i++) {
             cpu_buffer[i] = arr[i];
         }
         mesh_attr.cpu_buffer = cpu_buffer;
-        mesh_attr.buffer_desc = new Array_Buffer_Desc(type, size, normalize, stride, offset);
+        mesh_attr.buffer_desc = new Array_Buffer_Desc(elem_type, elem_cnt_per_stride, whether_normalize, stride_cnt, offset_cnt);
     }
 
     update_mesh_to_gpu(mesh_name) {
@@ -866,6 +1022,19 @@ class Simple_3D_Renderer {
             throw new Error("mesh name 不存在");
         }
         let mesh = this.__static.mesh_map.get(mesh_name);
+        if (mesh.has_idx_buffer) {
+            let original_gpu_idx_buffer = mesh.gpu_idx_buffer;
+            let new_gpu_buffer = this.__gl.createBuffer();
+            if (new_gpu_buffer === null || new_gpu_buffer === undefined) {
+                throw new Error("无法创建 gpu array buffer");
+            }
+            this.__gl.bindBuffer(this.__gl.ELEMENT_ARRAY_BUFFER, new_gpu_buffer);
+            this.__gl.bufferData(this.__gl.ELEMENT_ARRAY_BUFFER, mesh.cpu_idx_buffer, this.__gl.STATIC_DRAW);
+            mesh.gpu_idx_buffer = new_gpu_buffer;
+            if (original_gpu_idx_buffer !== null) {
+                this.__gl.deleteBuffer(original_gpu_idx_buffer);
+            }
+        }
         for (let mesh_attr_kv of mesh.attr_map) {
             let original_gpu_buffer = mesh_attr_kv[1].gpu_buffer;
             let new_gpu_buffer = this.__gl.createBuffer();
@@ -881,25 +1050,74 @@ class Simple_3D_Renderer {
         }
     }
 
-    setup_render_state(is_clear) {
+    setup_render_state(is_clear, go) {
+
+        this.__gl.enable(this.__gl.CULL_FACE);
+        this.__gl.frontFace(this.__gl.CW);
+        this.__gl.cullFace(this.__gl.BACK);
 
         this.__gl.enable(this.__gl.DEPTH_TEST);
         this.__gl.depthFunc(this.__gl.LESS);
+
         this.__gl.viewport(0, 0, this.__cvs.width, this.__cvs.height);
-        if (is_clear) {
-            this.__gl.clearColor(1, 1, 1, 1);
-            this.__gl.clear(this.__gl.COLOR_BUFFER_BIT | this.__gl.DEPTH_BUFFER_BIT);
+    }
+
+    set_clear_flag(clear_flag) {
+
+        let final = 0;
+
+        if (Simple_3D_Renderer.Constants.CLEAR_COLOR_BUFFER & clear_flag === 1) {
+            final |= this.__gl.COLOR_BUFFER_BIT;
         }
+
+        if (Simple_3D_Renderer.Constants.CLEAR_DEPTH_BUFFER & clear_flag === 1) {
+            final |= this.__gl.DEPTH_BUFFER_BIT;
+        }
+
+        this.__config.clear_flag = final;
+    }
+
+    set_clear_color(r, g, b, a) {
+
+        this.__config.clear_color[0] = r;
+        this.__config.clear_color[1] = g;
+        this.__config.clear_color[2] = b;
+        this.__config.clear_color[3] = a;
+    }
+
+    set_clear_depth(depth_val) {
+
+        this.__config.clear_depth = depth_val;
+    }
+
+    clear_frame_buffer() {
+
+        this.__gl.clearColor(
+            this.__config.clear_color[0],
+            this.__config.clear_color[1],
+            this.__config.clear_color[2],
+            this.__config.clear_color[3]
+        );
+        this.__gl.clearDepth(this.__config.clear_depth);
+        this.__gl.clear(this.__config.clear_flag);
     }
 
     render(go) {
 
-        go.setup_shader_and_data();
-        this.__gl.drawArrays(
-            this.__gl.TRIANGLES,
-            0,
-            go.get_material().__mesh_used.vertex_cnt,
-        );
+        if (go.get_material().__mesh_used.has_idx_buffer) {
+            this.__gl.drawElements(
+                this.__gl.TRIANGLES,
+                go.get_material().__mesh_used.vertex_or_idx_cnt,
+                this.__gl.UNSIGNED_SHORT,
+                0
+            );
+        } else {
+            this.__gl.drawArrays(
+                this.__gl.TRIANGLES,
+                0,
+                go.get_material().__mesh_used.vertex_or_idx_cnt,
+            );
+        }
     }
 
     end_render() {
@@ -947,12 +1165,18 @@ class Simple_3D_Renderer {
     }
 
     setup_uniform_data(location, sl_type_instance) {
-
-        if (sl_type_instance instanceof SL_Type_Vec4) {
+        if (sl_type_instance instanceof SL_Type_Float) {
+            this.__gl.uniform1fv(location, sl_type_instance.data);
+        } else if (sl_type_instance instanceof SL_Type_Vec4) {
             this.__gl.uniform4fv(location, sl_type_instance.data);
         } else if (sl_type_instance instanceof SL_Type_Mat4) {
             this.__gl.uniformMatrix4fv(location, false, sl_type_instance.data);
         }
+    }
+
+    bind_global_idx_buffer(gpu_idx_buffer) {
+
+        this.__gl.bindBuffer(this.__gl.ELEMENT_ARRAY_BUFFER, gpu_idx_buffer);
     }
 
     /**
