@@ -21,6 +21,513 @@ class S3R_Utility {
     }
 }
 
+class Polygon_Triangulation {
+
+    static Vec2D = class {
+
+        __temp = null;
+
+        x = 0;
+        y = 0;
+
+        init(x, y) {
+            this.x = x;
+            this.y = y;
+        }
+
+        set_from_to(p_from, p_to) {
+            this.x = p_to.x - p_from.x;
+            this.y = p_to.y - p_from.y;
+        }
+
+        dot_product(vec) {
+
+            return this.x * vec.x + this.y * vec.y;
+        }
+
+        cross_product(vec) {
+
+            return this.y * vec.x - this.x * vec.y;
+        }
+
+        rotate_self_x_2_y() {
+
+            this.__temp = this.x;
+            this.x = -this.y;
+            this.y = this.__temp;
+        }
+    }
+
+
+    static __Cached = {
+
+        v0: new Polygon_Triangulation.Vec2D(),
+        v1: new Polygon_Triangulation.Vec2D(),
+        v: new Polygon_Triangulation.Vec2D(),
+        arr: []
+    };
+
+    static List_Node = class {
+
+        __list = null;
+        __pre = null;
+        __nxt = null;
+        val = null;
+
+        constructor(val) {
+
+            this.__pre = this;
+            this.__nxt = this;
+            this.val = val;
+        }
+
+        insert_after_self(node) {
+
+            node.__pre = this;
+            node.__nxt = this.__nxt;
+
+            this.__nxt.__pre = node;
+
+            if (this.__pre === this) {
+                this.__pre = node;
+            }
+            this.__nxt = node;
+
+            //size++
+            if (this.__list === null) {
+                this.__list = {size: 1};
+            }
+            this.__list.size++;
+
+            //传染list
+            node.__list = this.__list;
+
+            return node;
+        }
+
+        /**
+         * 删除当前节点, 返回当前节点的下一个节点
+         * @return {*|null|Polygon_Triangulation.List_Node}
+         */
+        remove_self() {
+
+            this.__pre.__nxt = this.__nxt;
+            this.__nxt.__pre = this.__pre;
+
+            //size--
+            this.__list.size--;
+
+            let nxt = this.__nxt;
+
+            this.__list = {size: 1};
+            this.__pre = this;
+            this.__nxt = this;
+
+            return nxt;
+        }
+
+        /**
+         * (node)=>{}
+         *  返回假直接结束迭代，返回其他值被忽略, 一直迭代完整个链表
+         * @param fn
+         */
+        iterate_from_self(fn) {
+            let it = this;
+            do {
+                if (fn(it) === false) {
+                    break;
+                }
+                it = it.__nxt;
+            } while (it !== this);
+        }
+
+        static Init_list_from_arr(arr) {
+
+            if (arr === null) {
+                return null;
+            }
+            let head = new Polygon_Triangulation.List_Node("flag");
+            let node = head;
+            arr.forEach((e) => {
+                node = node.insert_after_self(new Polygon_Triangulation.List_Node(e));
+            });
+            //删除空head
+            return head.remove_self();
+        }
+    }
+
+    static Is_in_triangle(p, p0, p1, p2) {
+
+        let cached = this.__Cached;
+        let cached_arr = cached.arr;
+
+        cached_arr.length = 0;
+        cached_arr.push(p0, p1, p2);
+
+        cached.v0.set_from_to(cached_arr[0], cached_arr[1]);
+        cached.v1.set_from_to(cached_arr[1], cached_arr[2]);
+
+        //确定方向
+        let sign = cached.v0.cross_product(cached.v1) <= 0;
+
+        for (let i = 0; i < 3; i++) {
+            cached.v0.set_from_to(cached_arr[i], cached_arr[(i + 1) % 3]);
+            //判断前后
+            cached.v.set_from_to(cached_arr[i], p);
+            if ((cached.v0.cross_product(cached.v) <= 0) !== sign) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    static get Natural_winding() {
+        return 0;
+    };
+
+    static get Anti_Natural_winding() {
+        return 1;
+    }
+
+    static get Unknown_winding() {
+        return -1;
+    }
+
+    static Polygon = class {
+
+        __head = null;
+        __cur_min_x = Infinity;
+        __cur_min_x_node = null;
+        __winding = Polygon_Triangulation.Unknown_winding;
+
+        init(pnts_arr, winding) {
+            this.eat_arr(pnts_arr);
+            this.__winding = winding;
+        }
+
+        is_points_cnt_available() {
+            return this.__head.__list.size >= 3;
+        }
+
+        eat_arr(arr) {
+            arr.forEach((pnt) => {
+                this.push_pnt(pnt);
+            });
+        }
+
+        push_pnt(pnt) {
+            if (this.__head === null) {
+                this.__head = new Polygon_Triangulation.List_Node(pnt);
+            } else {
+                this.__head.__pre.insert_after_self(new Polygon_Triangulation.List_Node(pnt));
+            }
+            if (pnt.x < this.__cur_min_x) {
+                this.__cur_min_x = pnt.x;
+                this.__cur_min_x_node = this.__head.__pre;
+            }
+        }
+
+        /**
+         * (node)=>{}
+         * @param fn
+         */
+        iterate(fn) {
+            this.__head.iterate_from_self(fn);
+        }
+
+        get_pnts_arr() {
+            return this.__head.__nxt;
+        }
+
+        get_min_x_node() {
+            return this.__cur_min_x_node;
+        }
+    }
+
+    /**
+     * 计算-x方向射线与线段相交, 参数是node而不是pnt
+     * @param ray_ori
+     * @param p0
+     * @param p1
+     * @param result_pack input an object like {point: null, is_end_point: false)}
+     * @constructor
+     */
+    static Intersect_neg_x(ray_ori, p0, p1, result_pack) {
+
+        //排序
+        let t = null;
+        if (p0.val.x > p1.val.x) {
+            //交换
+            t = p0;
+            p0 = p1;
+            p1 = t;
+        }
+        //此时p1.val.x总是大
+        //解决特殊情况线段与x轴平行
+        if (p0.val.y === p1.val.y) {
+            if (ray_ori.val.y !== p0.val.y) {
+                //无交点
+                result_pack.node = null;
+                result_pack.is_end_pnt = false;
+                return;
+            }
+            if (ray_ori.val.x >= p1.val.x) {
+                result_pack.node = p1;
+                result_pack.is_end_pnt = true;
+                return;
+            }
+            if (ray_ori.val.x >= p0.val.x) {
+                result_pack.node = p0;
+                result_pack.is_end_pnt = true;
+                return;
+            }
+            result_pack.node = null;
+            result_pack.is_end_pnt = false;
+            return;
+        }
+        //检查是否经过端点
+        if (ray_ori.val.x >= p0.val.x && ray_ori.val.y === p0.val.y) {
+            result_pack.node = p0;
+            result_pack.is_end_pnt = true;
+            return;
+        }
+        if (ray_ori.val.x >= p1.val.x && ray_ori.val.y === p1.val.y) {
+            result_pack.node = p1;
+            result_pack.is_end_pnt = true;
+            return;
+        }
+        //现在正常解决
+        //按照y排序
+        if (p0.val.y >/*不可能有等于*/ p1.val.y) {
+            //交换
+            t = p0;
+            p0 = p1;
+            p1 = t;
+        }
+        //此时p0.val.y总是小
+        //计算t
+        t = (ray_ori.val.y - p0.val.y) / (p1.val.y - p0.val.y);
+        //检查交点的y
+        if (t <= 0 || t >= 1) {
+            //交点不在线段上
+            result_pack.node = null;
+            result_pack.is_end_pnt = false;
+            return;
+        }
+        //获取交点的x
+        let x = (1.0 - t) * p0.val.x + t * p1.val.x;
+        if (x > ray_ori.val.x) {
+            //交点不在射线原点-x方向
+            result_pack.node = null;
+            result_pack.is_end_pnt = false;
+            return;
+        }
+        //有交点
+        result_pack.node = new Polygon_Triangulation.List_Node({x: x, y: (1.0 - t) * p0.val.y + t * p1.val.y});
+        result_pack.is_end_pnt = false;
+        result_pack.min_x_node_on_line = p0.val.x < p1.val.x ? p0 : p1;
+    }
+
+    /**
+     * 两个node应该来自不同的list
+     * @param node0
+     * @param node1
+     * @private
+     */
+    static __Mix_diff_nodes_list(node0, node1) {
+
+        //node0 <- node1
+        //复制两个node
+        let node0_copy = new Polygon_Triangulation.List_Node(node0.val);
+        let node1_copy = new Polygon_Triangulation.List_Node(node1.val);
+        node0_copy.is_copy_of = node0;
+        node1_copy.is_copy_of = node1;
+        node0.alias = node0_copy;
+        node1.alias = node1_copy;
+        node0_copy.alias = node0;
+        node1_copy.alias = node1;
+        //打标记
+        //接入
+        node1.__pre.insert_after_self(node1_copy);
+        node1_copy.insert_after_self(node0_copy);
+
+        node0_copy.__nxt = node0.__nxt;
+        node0.__nxt.__pre = node0_copy;
+
+        node0.__nxt = node1;
+        node1.__pre = node0;
+    }
+
+    /**
+     *
+     * @param poly winding必须 不是hole_winding 且 不是Unknown_winding  且 顶点数量大于等于3
+     * @param hole_poly_arr winding必须 是 hole_winding 且 顶点数量大于等于3
+     * @param hole_winding 必须不是Unknown_winding
+     * @constructor
+     */
+    static Triangulate_EC(poly, hole_poly_arr, hole_winding) {
+
+        //检查
+        if (hole_winding === Polygon_Triangulation.Unknown_winding) {
+            throw new Error("hole_winding 必须不是Unknown_winding");
+        }
+        if (poly.__winding === hole_winding || poly.__winding === Polygon_Triangulation.Unknown_winding || poly.is_points_cnt_available() === false) {
+            throw new Error("poly winding必须 不是 hole_winding且 不是 Unknown_winding 且 顶点数量大于等于3");
+        }
+        hole_poly_arr.forEach((hole_poly) => {
+            if (hole_poly.__winding !== hole_winding || hole_poly.is_points_cnt_available() === false) {
+                throw new Error("hole_poly_arr winding必须 是 hole_winding 且 顶点数量大于等于3");
+            }
+        });
+        //开始牵红线
+        //对hole进行x排序由小到大
+        hole_poly_arr.sort((a, b) => {
+            if (a.get_min_x_node().val.x < b.get_min_x_node().val.x) {
+                return -1;
+            } else if (a.get_min_x_node().val.x === b.get_min_x_node().val.x) {
+                return 0;
+            }
+            return 1;
+        });
+        //遍历并且开始牵红线
+        let min_x_node = null;
+        let ret = {node: null, is_end_pnt: false, min_x_node_on_line: null};
+        let min_distance_ret = {node: null, is_end_pnt: false, min_x_node_on_line: null};
+        let in_triangle_node = [];
+        hole_poly_arr.forEach((hole_poly) => {
+            //循环获取交点
+            min_x_node = hole_poly.get_min_x_node();
+            min_distance_ret.node = null;
+            min_distance_ret.is_end_pnt = false;
+            min_distance_ret.min_x_node_on_line = null;
+            poly.iterate((poly_node) => {
+                //计算相交
+                Polygon_Triangulation.Intersect_neg_x(min_x_node, poly_node, poly_node.__nxt, ret);
+                if (ret.node !== null) {
+                    //有交点
+                    if (min_distance_ret.node !== null) {
+                        if (ret.node.val.x > min_distance_ret.node.val.x) {
+                            min_distance_ret.node = ret.node;
+                            min_distance_ret.is_end_pnt = ret.is_end_pnt;
+                            min_distance_ret.min_x_node_on_line = ret.min_x_node_on_line;
+                        }
+                    } else {
+                        min_distance_ret.node = ret.node;
+                        min_distance_ret.is_end_pnt = ret.is_end_pnt;
+                        min_distance_ret.min_x_node_on_line = ret.min_x_node_on_line;
+                    }
+                }
+            });
+            //计算交点并且牵红线
+            if (min_distance_ret.node !== null) {
+                console.log("intersect", min_distance_ret);
+                if (min_distance_ret.is_end_pnt) {
+                    //直接牵线
+                    Polygon_Triangulation.__Mix_diff_nodes_list(min_distance_ret.node, min_x_node);
+                    //结束iterate
+                    return false;
+                } else {
+                    //计算交点三角形内是否有其他点
+                    in_triangle_node.length = 0;
+                    poly.iterate((poly_node) => {
+                        if (poly_node === min_distance_ret.min_x_node_on_line) {
+                            //跳过循环
+                            return true;
+                        }
+                        if (Polygon_Triangulation.Is_in_triangle(poly_node.val, min_x_node.val, min_distance_ret.node.val, min_distance_ret.min_x_node_on_line.val)) {
+                            in_triangle_node.push(poly_node);
+                        }
+                    });
+                    if (in_triangle_node.length === 0) {
+                        //直接牵线
+                        //牵线有最小x的
+                        Polygon_Triangulation.__Mix_diff_nodes_list(min_distance_ret.min_x_node_on_line, min_x_node);
+                        //结束iterate
+                        return false;
+                    } else {
+                        //找到距离最小的最后牵线
+                        in_triangle_node.sort((a, b) => {
+                            let dis_a = Math.pow(a.val.x - min_x_node.val.x, 2) + Math.pow(a.val.y - min_x_node.val.y, 2);
+                            let dis_b = Math.pow(b.val.x - min_x_node.val.x, 2) + Math.pow(b.val.y - min_x_node.val.y, 2);
+                            if (dis_a < dis_b) {
+                                return -1;
+                            } else if (dis_a === dis_b) {
+                                return 0;
+                            }
+                            return 1;
+                        });
+                        //牵线
+                        Polygon_Triangulation.__Mix_diff_nodes_list(in_triangle_node[0], min_x_node);
+                        //结束iterate
+                        return false;
+                    }
+                }
+            } else {
+                //无交点
+                throw new Error("Hole intersects with the outer polygon!");
+            }
+        });
+
+        // return poly;
+        //开始三角化
+        let go_pre = false;
+        let has_pnt_in_triangle = false;
+        let result_triangles = [];
+        let it_node = poly.__head;
+        let none_hole_winding_sign = null;
+        if (hole_winding === Polygon_Triangulation.Natural_winding) {
+            none_hole_winding_sign = 1 <= 0;
+        } else if (hole_winding === Polygon_Triangulation.Anti_Natural_winding) {
+            none_hole_winding_sign = -1 <= 0;
+        }
+        while (true) {
+            if (it_node.__pre === it_node.__nxt) {
+                //顶点数量小于3，算法结束
+                break;
+            }
+            //对于此顶点，观察与周围的两个顶点组合，是否成为凸顶点
+            this.__Cached.v0.set_from_to(it_node.__pre.val, it_node.val);
+            this.__Cached.v1.set_from_to(it_node.val, it_node.__nxt.val);
+            if ((this.__Cached.v0.cross_product(this.__Cached.v1) <= 0) === none_hole_winding_sign) {
+                //找到凸三角形
+                //遍历保证没有顶点落在里面
+                has_pnt_in_triangle = false;
+                it_node.__nxt.__nxt.iterate_from_self((node) => {
+                    if (node === it_node.__pre) {
+                        //结束
+                        return false;
+                    }
+                    if (node.alias === it_node || node.alias === it_node.__pre || node.alias === it_node.__nxt) {
+                        //跳过
+                        return;
+                    }
+                    //是否在三角形内
+                    if (Polygon_Triangulation.Is_in_triangle(node.val, it_node.__pre.val, it_node.val, it_node.__nxt.val)) {
+                        has_pnt_in_triangle = true;
+                        return false;
+                    }
+                });
+                if (has_pnt_in_triangle) {
+                    //此顶点不满足要求，下一个
+                } else {
+                    //加入三角形
+                    result_triangles.push(it_node.__pre.val, it_node.val, it_node.__nxt.val);
+                    //移除此顶点
+                    if (go_pre) {
+                        it_node = it_node.remove_self().__pre.__pre;
+                    } else {
+                        it_node = it_node.remove_self().__pre;
+                    }
+                    go_pre = !go_pre;
+                }
+            }
+            it_node = it_node.__nxt;
+        }
+        return result_triangles;
+    }
+}
+
 class Vector4 {
 
     __data = new Float32Array(4);
@@ -581,7 +1088,7 @@ class SL_Type {
  */
 class SL_Type_Int32 {
 
-    __data = new Float32Array(1);
+    __data = new Int32Array(1);
 
     static get INT32_CNT() {
         return 1;
@@ -902,6 +1409,15 @@ class Material extends Components {
         this.__uniform_data_map.get(name).copy_from(float32_arr, from_idx);
     }
 
+    add_texture2d(name, slot) {
+
+        let tex2d = this.__go_belongs_to.__s3r_belongs_to.get_texture2d(name);
+        if (tex2d === null) {
+            throw new Error("无法添加TEXTURE2D: " + name + ", 找不到");
+        }
+        this.texture_used_map.set(name, [tex2d, slot]);
+    }
+
     get program_ctx_used() {
         return this.__program_ctx_used;
     }
@@ -986,11 +1502,16 @@ class Simple_3D_Renderer {
         get RGB() {
             return WebGL2RenderingContext.RGB;
         },
+        get RGBA() {
+            return WebGL2RenderingContext.RGBA;
+        },
         get UNSIGNED_BYTE() {
             return WebGL2RenderingContext.UNSIGNED_BYTE;
         }
     };
 
+    //TODO: 增加glsl语法，预处理所有webgl location
+    //TODO: /^((?:\s|\n)*@([\w]+)<%(?:\s|\n)*(\n|.)*?(?:\s|\n)*%>(?:\s|\n)*)$/g;
     create_program_ctx(ctx_name, vs_code, fs_code, attr_desc) {
 
         let ctx = new Program_Ctx();
@@ -1039,7 +1560,7 @@ class Simple_3D_Renderer {
         }
 
         //config
-        this.__config.clear_flag = this.__gl.COLOR_BUFFER_BIT | this.__gl.DEPTH_BUFFER_BIT;
+        this.__config.clear_flag = Simple_3D_Renderer.Constants.CLEAR_COLOR_BUFFER | Simple_3D_Renderer.Constants.CLEAR_DEPTH_BUFFER;
         this.__config.clear_color = [0.0, 0.0, 0.0, 0.0];
         this.__config.clear_depth = 1.0;
 
@@ -1180,8 +1701,8 @@ class Simple_3D_Renderer {
         let tex2d = new Texture2D(this);
         this.__static.texture2d_map.set(name, tex2d);
         tex2d.__webgl2_texture = this.__gl.createTexture();
-        
-        this.__gl.activeTexture(this.__gl.TEXTURE0 + 0);
+
+        this.__gl.activeTexture(this.__gl.TEXTURE0);
         this.__gl.bindTexture(this.__gl.TEXTURE_2D, tex2d.__webgl2_texture);
 
         this.__gl.texParameteri(this.__gl.TEXTURE_2D, this.__gl.TEXTURE_WRAP_S, this.__gl.CLAMP_TO_EDGE);
@@ -1190,25 +1711,60 @@ class Simple_3D_Renderer {
         this.__gl.texParameteri(this.__gl.TEXTURE_2D, this.__gl.TEXTURE_MAG_FILTER, this.__gl.NEAREST);
     }
 
-    upload_texture2d_data(name, format_desired, actual_format, actual_format_elem_type, width, height, data) {
+    upload_texture2d_data(name, format_desired, actual_format, actual_format_elem_type, data, width, height) {
 
         if (this.__static.texture2d_map.has(name) === false) {
             throw new Error("2D纹理名称不存在");
         }
 
         let tex2d = this.__static.texture2d_map.get(name);
-        this.__gl.texImage2D(this.__gl.TEXTURE_2D, 0, format_desired, width, height, 0, actual_format, actual_format_elem_type, data);
+
+        this.__gl.activeTexture(this.__gl.TEXTURE0);
+        this.__gl.bindTexture(this.__gl.TEXTURE_2D, tex2d.__webgl2_texture);
+
+        //是否有width height
+        if (typeof width === "undefined" || typeof height === "undefined") {
+            this.__gl.texImage2D(this.__gl.TEXTURE_2D, 0, format_desired, actual_format, actual_format_elem_type, data);
+        } else {
+            this.__gl.texImage2D(this.__gl.TEXTURE_2D, 0, format_desired, width, height, 0, actual_format, actual_format_elem_type, data);
+        }
     }
 
-    set_texture2d_position(texture2d_name, idx) {
+    bind_texture2d_to_slot(texture2d_or_name, idx) {
 
-        if (this.__static.texture2d_map.has(texture2d_name) === false) {
-            throw new Error("2D纹理名称不存在");
+        if (typeof texture2d_or_name === "string") {
+            if (this.__static.texture2d_map.has(texture2d_or_name) === false) {
+                throw new Error("2D纹理名称不存在");
+            }
+            texture2d_or_name = this.__static.texture2d_map.get(texture2d_or_name);
+        } else if (texture2d_or_name instanceof Texture2D === false) {
+            throw new Error("传入的参数类型错误");
         }
 
-        let tex2d = this.__static.texture2d_map.get(texture2d_name);
-        this.__gl.activeTexture(this.__gl.TEXTURE0 + idx);
-        this.__gl.bindTexture(this.__gl.TEXTURE_2D, tex2d.__webgl2_texture);
+        if (idx < 0 || idx >= this.max_texture2d_position_cnt()) {
+            throw new Error("position idx越界, 请使用S3R.get_max_texture2d_position_cnt()确定范围");
+        }
+
+        this.__gl.activeTexture(this.__gl["TEXTURE" + idx]);
+        this.__gl.bindTexture(this.__gl.TEXTURE_2D, texture2d_or_name.__webgl2_texture);
+    }
+
+    get_texture2d(name) {
+
+        if (this.__static.texture2d_map.has(name)) {
+            return this.__static.texture2d_map.get(name);
+        } else {
+            return null;
+        }
+    }
+
+    /**
+     * 0 ~ (返回值 - 1)
+     * @return {any}
+     */
+    max_texture2d_position_cnt() {
+
+        return this.__gl.getParameter(WebGL2RenderingContext.MAX_COMBINED_TEXTURE_IMAGE_UNITS);
     }
 
     setup_render_state(go) {
@@ -1264,6 +1820,10 @@ class Simple_3D_Renderer {
                 }
                 this.upload_uniform_with_sl_type_instance(uniform_location_kv[1].location, uniform_data);
             }
+        }
+        //绑定texture2d
+        for (let texture_slot_kv of material.__texture_used_map) {
+            this.bind_texture2d_to_slot(texture_slot_kv[1][0], texture_slot_kv[1][1]);
         }
     }
 
