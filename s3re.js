@@ -1,170 +1,6 @@
-function parseOBJ(text) {
-    // because indices are base 1 let's just fill in the 0th data
-    const objPositions = [[0, 0, 0]];
-    const objTexcoords = [[0, 0]];
-    const objNormals = [[0, 0, 0]];
-    const objColors = [[0, 0, 0]];
+class S3R_OBJ_Parser {
 
-    // same order as `f` indices
-    const objVertexData = [
-        objPositions,
-        objTexcoords,
-        objNormals,
-        objColors,
-    ];
-
-    // same order as `f` indices
-    let webglVertexData = [
-        [],   // positions
-        [],   // texcoords
-        [],   // normals
-        [],   // colors
-    ];
-
-    const materialLibs = [];
-    const geometries = [];
-    let geometry;
-    let groups = ['default'];
-    let material = 'default';
-    let object = 'default';
-
-    const noop = () => {
-    };
-
-    function newGeometry() {
-        // If there is an existing geometry and it's
-        // not empty then start a new one.
-        if (geometry && geometry.data.position.length) {
-            geometry = undefined;
-        }
-    }
-
-    function setGeometry() {
-        if (!geometry) {
-            const position = [];
-            const texcoord = [];
-            const normal = [];
-            const color = [];
-            webglVertexData = [
-                position,
-                texcoord,
-                normal,
-                color,
-            ];
-            geometry = {
-                object,
-                groups,
-                material,
-                data: {
-                    position,
-                    texcoord,
-                    normal,
-                    color,
-                },
-            };
-            geometries.push(geometry);
-        }
-    }
-
-    function addVertex(vert) {
-        const ptn = vert.split('/');
-        ptn.forEach((objIndexStr, i) => {
-            if (!objIndexStr) {
-                return;
-            }
-            const objIndex = parseInt(objIndexStr);
-            const index = objIndex + (objIndex >= 0 ? 0 : objVertexData[i].length);
-            webglVertexData[i].push(...objVertexData[i][index]);
-            // if this is the position index (index 0) and we parsed
-            // vertex colors then copy the vertex colors to the webgl vertex color data
-            if (i === 0 && objColors.length > 1) {
-                geometry.data.color.push(...objColors[index]);
-            }
-        });
-    }
-
-    const keywords = {
-        v(parts) {
-            // if there are more than 3 values here they are vertex colors
-            if (parts.length > 3) {
-                objPositions.push(parts.slice(0, 3).map(parseFloat));
-                objColors.push(parts.slice(3).map(parseFloat));
-            } else {
-                objPositions.push(parts.map(parseFloat));
-            }
-        },
-        vn(parts) {
-            objNormals.push(parts.map(parseFloat));
-        },
-        vt(parts) {
-            // should check for missing v and extra w?
-            objTexcoords.push(parts.map(parseFloat));
-        },
-        f(parts) {
-            setGeometry();
-            const numTriangles = parts.length - 2;
-            for (let tri = 0; tri < numTriangles; ++tri) {
-                addVertex(parts[0]);
-                addVertex(parts[tri + 1]);
-                addVertex(parts[tri + 2]);
-            }
-        },
-        s: noop,    // smoothing group
-        mtllib(parts, unparsedArgs) {
-            // the spec says there can be multiple filenames here
-            // but many exist with spaces in a single filename
-            materialLibs.push(unparsedArgs);
-        },
-        usemtl(parts, unparsedArgs) {
-            material = unparsedArgs;
-            newGeometry();
-        },
-        g(parts) {
-            groups = parts;
-            newGeometry();
-        },
-        o(parts, unparsedArgs) {
-            object = unparsedArgs;
-            newGeometry();
-        },
-    };
-
-    const keywordRE = /(\w*)(?: )*(.*)/;
-    const lines = text.split('\n');
-    for (let lineNo = 0; lineNo < lines.length; ++lineNo) {
-        const line = lines[lineNo].trim();
-        if (line === '' || line.startsWith('#')) {
-            continue;
-        }
-        const m = keywordRE.exec(line);
-        if (!m) {
-            continue;
-        }
-        const [, keyword, unparsedArgs] = m;
-        const parts = line.split(/\s+/).slice(1);
-        const handler = keywords[keyword];
-        if (!handler) {
-            console.warn('unhandled keyword:', keyword);  // eslint-disable-line no-console
-            continue;
-        }
-        handler(parts, unparsedArgs);
-    }
-
-    // remove any arrays that have no entries.
-    for (const geometry of geometries) {
-        geometry.data = Object.fromEntries(
-            Object.entries(geometry.data).filter(([, array]) => array.length > 0));
-    }
-
-    return {
-        geometries,
-        materialLibs,
-    };
-}
-
-class Object_Reader {
-
-    static parse(string) {
+    static Parse(string) {
 
         let ret = {
             v_temp: [],
@@ -173,25 +9,24 @@ class Object_Reader {
             vt_temp_idx: [],
             vn_temp: [],
             vn_temp_idx: [],
-            v: null,
-            vt: null,
-            vn: null
+            vertex_cnt: -1,
+            position_buffer: null,
+            uv_buffer: null,
+            normal_buffer: null
         };
         let idx = 0;
-        let idx_max = -1;
         let row_str = null;
         let space_split_arr = null;
         let slash_split_arr = null;
         let regexp_spaces = new RegExp("[ ]+");
         let regexp_slash = new RegExp("/");
-        let triangle_face = false;
         while (true) {
             let old = idx;
-            idx = this.Read_Line(string, idx);
+            idx = this.__Read_Line(string, idx);
             if (idx === -1) {
                 break;
             }
-            row_str = string.substring(old, idx - this.Get_Trailing_LineBreakers_Cnt(string, old, idx));
+            row_str = string.substring(old, idx - this.__Get_Trailing_LineBreakers_Cnt(string, old, idx));
             space_split_arr = row_str.split(regexp_spaces);
             if (space_split_arr[0] === 'v') {
                 if (space_split_arr.length !== 4) {
@@ -243,9 +78,6 @@ class Object_Reader {
                         int--;
                         if (k === 0) {
                             ret.v_temp_idx.push(int);
-                            if (int > idx_max) {
-                                idx_max = int;
-                            }
                         } else if (k === 1) {
                             ret.vt_temp_idx.push(int);
                         } else if (k === 2) {
@@ -254,31 +86,37 @@ class Object_Reader {
                     }
                 }
             } else if (space_split_arr[0] === "s") {
-
+                //NOT IMPLEMENTED YET
             }
         }
 
-        ret.v = new Float32Array(ret.v_temp_idx.length * 3);
-        ret.vt = new Float32Array(ret.vt_temp_idx.length * 3);
-        ret.vn = new Float32Array(ret.vn_temp_idx.length * 3);
+        //判断合法性
+        if (ret.v_temp_idx.length !== ret.vt_temp_idx.length || ret.v_temp_idx.length !== ret.vn_temp_idx.length) {
+            throw new Error("OBJ文件格式错误: 顶点, 模型, 法线 索引数量不一致");
+        }
+
+        ret.vertex_cnt = ret.v_temp_idx.length;
+        ret.position_buffer = new Float32Array(ret.v_temp_idx.length * 3);
+        ret.uv_buffer = new Float32Array(ret.vt_temp_idx.length * 2);
+        ret.normal_buffer = new Float32Array(ret.vn_temp_idx.length * 3);
 
         for (let i = 0; i < ret.v_temp_idx.length; i++) {
-            ret.v[3 * i] = ret.v_temp[3 * ret.v_temp_idx[i]];
-            ret.v[3 * i + 1] = ret.v_temp[3 * ret.v_temp_idx[i] + 1];
-            ret.v[3 * i + 2] = ret.v_temp[3 * ret.v_temp_idx[i] + 2];
+            ret.position_buffer[3 * i] = ret.v_temp[3 * ret.v_temp_idx[i]];
+            ret.position_buffer[3 * i + 1] = ret.v_temp[3 * ret.v_temp_idx[i] + 1];
+            ret.position_buffer[3 * i + 2] = ret.v_temp[3 * ret.v_temp_idx[i] + 2];
 
-            ret.vt[2 * ret.v_temp_idx[i]] = ret.vt_temp[2 * ret.vt_temp_idx[i]];
-            ret.vt[2 * ret.v_temp_idx[i] + 1] = ret.vt_temp[2 * ret.vt_temp_idx[i] + 1];
+            ret.uv_buffer[2 * ret.v_temp_idx[i]] = ret.vt_temp[2 * ret.vt_temp_idx[i]];
+            ret.uv_buffer[2 * ret.v_temp_idx[i] + 1] = ret.vt_temp[2 * ret.vt_temp_idx[i] + 1];
 
-            ret.vn[3 * i] = ret.vn_temp[3 * ret.vn_temp_idx[i]];
-            ret.vn[3 * i + 1] = ret.vn_temp[3 * ret.vn_temp_idx[i] + 1];
-            ret.vn[3 * i + 2] = ret.vn_temp[3 * ret.vn_temp_idx[i] + 2];
+            ret.normal_buffer[3 * i] = ret.vn_temp[3 * ret.vn_temp_idx[i]];
+            ret.normal_buffer[3 * i + 1] = ret.vn_temp[3 * ret.vn_temp_idx[i] + 1];
+            ret.normal_buffer[3 * i + 2] = ret.vn_temp[3 * ret.vn_temp_idx[i] + 2];
         }
 
         return ret;
     }
 
-    static Read_Line(str, from) {
+    static __Read_Line(str, from) {
 
         if (from >= str.length) {
             return -1;
@@ -302,7 +140,7 @@ class Object_Reader {
         }
     }
 
-    static Get_Trailing_LineBreakers_Cnt(str, from_include, to_exclude) {
+    static __Get_Trailing_LineBreakers_Cnt(str, from_include, to_exclude) {
 
         let i;
         for (i = to_exclude - 1; i >= from_include; i--) {
@@ -318,6 +156,21 @@ class Object_Reader {
  * 支持光照渲染
  */
 class S3R_Extend extends Simple_3D_Renderer {
+
+    __camera = {
+        transform: new Transform(),
+        transform_pos_data: new Float32Array(4),
+        projection_matrix: new Matrix4x4(),
+        camera_inv_trans: new Matrix4x4(),
+        mat_vp: new Matrix4x4()
+    };
+
+    __p_light = {
+        transform: new Transform(),
+        transform_pos_data: new Float32Array(4),
+        length: 1,
+        length_data: new Float32Array(1),
+    };
 
     init(cvs) {
 
@@ -351,6 +204,67 @@ class S3R_Extend extends Simple_3D_Renderer {
         this.__s3re_create_lighting_program();
     }
 
+    set_camera_pos(x, y, z) {
+
+        this.__camera.transform.set_translation(x, y, z);
+    }
+
+    set_camera_perspective_projection(near, far, fovy, aspect) {
+
+        this.__camera.projection_matrix.clear_and_init_with_perspective(near, far, fovy, aspect);
+    }
+
+    set_p_light(x, y, z, length) {
+
+        this.__p_light.transform.set_translation(x, y, z);
+        this.__p_light.length = length;
+    }
+
+    prepare_camera_uniform() {
+
+        if (this.__camera.transform.need_update()) {
+            this.__camera.transform.update_transform_matrix();
+            this.__camera.transform.__transform_mat.inverse_transpose(this.__camera.camera_inv_trans);
+            this.__camera.projection_matrix.multiply4x4(this.__camera.camera_inv_trans, this.__camera.mat_vp);
+            S3R_Utility.Array_Copy(this.__camera.transform.__translation, 0, this.__camera.transform_pos_data, 0, Infinity, true);
+        }
+    }
+
+    prepare_p_light_uniform() {
+
+        if (this.__p_light.transform.need_update()) {
+            S3R_Utility.Array_Copy(this.__p_light.transform.__translation, 0, this.__p_light.transform_pos_data, 0, Infinity, true);
+        }
+        this.__p_light.length_data[0] = this.__p_light.length;
+    }
+
+    upload_cross_go_uniform(go) {
+
+        //获取go的uniform location
+        //有的话就设置
+        for (let kv of go.material().program_ctx_used.__uniform_location_map) {
+            if (kv[0] === "s3re_u_mat4_vp" && Object.is(kv[1].data_type, SL_Type_Mat4)) {
+                this.prepare_camera_uniform();
+                super.upload_uniform_with_arr(kv[1].location, SL_Type_Mat4, this.__camera.mat_vp.data, 0);
+            } else if (kv[0] === "s3re_u_vec4_camera_pos_world" && Object.is(kv[1].data_type, SL_Type_Vec4)) {
+                this.prepare_camera_uniform();
+                super.upload_uniform_with_arr(kv[1].location, SL_Type_Vec4, this.__camera.transform_pos_data, 0);
+            } else if (kv[0] === "s3re_u_vec4_p_light_pos_world" && Object.is(kv[1].data_type, SL_Type_Vec4)) {
+                this.prepare_p_light_uniform();
+                super.upload_uniform_with_arr(kv[1].location, SL_Type_Vec4, this.__p_light.transform_pos_data, 0);
+            } else if (kv[0] === "s3re_u_float_p_light_length" && Object.is(kv[1].data_type, SL_Type_Float)) {
+                this.prepare_p_light_uniform();
+                super.upload_uniform_with_arr(kv[1].location, SL_Type_Float, this.__p_light.length_data, 0);
+            }
+        }
+    }
+
+    setup_render_state(go) {
+
+        super.setup_render_state(go);
+        this.upload_cross_go_uniform(go);
+    }
+
     __s3re_create_lighting_program() {
 
         let vs = `#version 300 es
@@ -358,7 +272,7 @@ class S3R_Extend extends Simple_3D_Renderer {
               precision highp float;
               
               uniform mat4 u_mat4_m; // 到世界坐标系
-              uniform mat4 u_mat4_vp;// 到相机坐标系再到裁剪空间(GPU会自动做透视除法转换到NDC坐标系)
+              uniform mat4 s3re_u_mat4_vp;// 到相机坐标系再到裁剪空间(GPU会自动做透视除法转换到NDC坐标系)
               
               in vec4 v_vec4_pos;
               in vec4 v_vec4_normal;
@@ -368,9 +282,7 @@ class S3R_Extend extends Simple_3D_Renderer {
 
               void main() {
 
-                vec4 p = u_mat4_vp * u_mat4_m * v_vec4_pos;
-                //p.z = pow(((p.z + 1.0) / 2.0), 10.0) * 2.0 - 1.0;
-                gl_Position = p;
+                gl_Position = s3re_u_mat4_vp * u_mat4_m * v_vec4_pos;
                 f_vec4_pos_object = v_vec4_pos;
                 f_vec4_normal_object = vec4(normalize(v_vec4_normal.xyz), 0);
               }
@@ -379,12 +291,14 @@ class S3R_Extend extends Simple_3D_Renderer {
         let fs = `#version 300 es
               //傻逼精度玩意儿操死你的吗
               precision highp float;
+              
+              #define MAGIC_NUMBER 1.2364
 
               uniform vec4 u_vec4_color;
               uniform mat4 u_mat4_m_inv_trans; // 到物体坐标系
-              uniform vec4 u_vec4_camera_pos_world;
-              uniform vec4 u_vec4_point_light_world_pos;
-              uniform float u_float_point_light_length;
+              uniform vec4 s3re_u_vec4_camera_pos_world;
+              uniform vec4 s3re_u_vec4_p_light_pos_world;
+              uniform float s3re_u_float_p_light_length;
 
               in vec4 f_vec4_pos_object;
               in vec4 f_vec4_normal_object;
@@ -394,23 +308,25 @@ class S3R_Extend extends Simple_3D_Renderer {
               void main() {
 
                 //转换到物体
-                vec3 point_light_pos_object = (u_mat4_m_inv_trans * u_vec4_point_light_world_pos).xyz;
-                vec3 camera_pos_object = (u_mat4_m_inv_trans * u_vec4_camera_pos_world).xyz;
+                vec3 point_light_pos_object = (u_mat4_m_inv_trans * s3re_u_vec4_p_light_pos_world).xyz;
+                vec3 camera_pos_object = (u_mat4_m_inv_trans * s3re_u_vec4_camera_pos_world).xyz;
                 //计算direction
-                vec3 light_direction = normalize(point_light_pos_object - f_vec4_pos_object.xyz);
+                vec3 light_direction = point_light_pos_object - f_vec4_pos_object.xyz;
                 vec3 view_direction = normalize(camera_pos_object - f_vec4_pos_object.xyz);
-                vec3 half_vector = normalize(light_direction + view_direction);
+                vec3 half_vector = normalize(normalize(light_direction) + view_direction);
                 //计算亮度和高光
-                vec3 normal = normalize(f_vec4_normal_object.xyz);
-                float specular = clamp(dot(normal, half_vector), 0.0, 1.0);
+                vec3 normal_object = normalize(f_vec4_normal_object.xyz);
+                float brightness = 1.0 - length(light_direction) / s3re_u_float_p_light_length;
+                brightness = clamp(brightness, 0.0, 1.0);
+                brightness *= dot(normal_object, normalize(light_direction));
+                brightness = pow(brightness, MAGIC_NUMBER);
+                float specular = clamp(dot(normal_object, half_vector), 0.0, 1.0);
                 specular = pow(specular, 128.0);
-                float brightness = 1.0 - length(light_direction) / u_float_point_light_length;
-                brightness *= clamp(dot(normal, light_direction), 0.0, 1.0);
-                brightness = pow(clamp(brightness, 0.0 , 1.0), 2.0);
-                vec4 color = mix(vec4(0, 0, 0, 1), u_vec4_color, brightness);
+                specular *= brightness;
+                //加入亮度
+                vec4 color = mix(vec4(0.0, 0.0, 0.0, 1.0), u_vec4_color, brightness);
                 //加入高光
-                color = mix(color, vec4(1, 1, 1, 1.0), specular);
-                //float z = pow(gl_FragCoord.z, 32.0);
+                color = mix(color, vec4(1.0, 1.0, 1.0, 1.0), specular);
                 s3re_FragColor = color;
               }
         `;
@@ -423,11 +339,11 @@ class S3R_Extend extends Simple_3D_Renderer {
             uniform: {
                 u_mat4_m: SL_Type_Mat4, // 到世界坐标系
                 u_mat4_m_inv_trans: SL_Type_Mat4, // 到物体坐标系
-                u_mat4_vp: SL_Type_Mat4,// 到相机坐标系再到裁剪空间(GPU会自动做透视除法转换到NDC坐标系)
                 u_vec4_color: SL_Type_Vec4,
-                u_vec4_camera_pos_world: SL_Type_Vec4,
-                u_vec4_point_light_world_pos: SL_Type_Vec4,
-                u_float_point_light_length: SL_Type_Float
+                s3re_u_mat4_vp: SL_Type_Mat4,// 到相机坐标系再到裁剪空间(GPU会自动做透视除法转换到NDC坐标系)
+                s3re_u_vec4_camera_pos_world: SL_Type_Vec4,
+                s3re_u_vec4_p_light_pos_world: SL_Type_Vec4,
+                s3re_u_float_p_light_length: SL_Type_Float
             }
         });
     }

@@ -2,23 +2,21 @@
  * Simple的3D渲染
  */
 
-class Utility {
+class S3R_Utility {
 
-    /**
-     * all expressed in byte view
-     * @param from_arr
-     * @param from_start_idx
-     * @param to_arr
-     * @param to_start_idx
-     * @param length
-     * @constructor
-     */
-    static Array_Copy(from_arr, from_start_idx, to_arr, to_start_idx, length) {
+    static Array_Copy(from, from_idx, to, to_idx, len, good_mode) {
 
-        let from = new Uint8Array(from_arr);
-        let to = new Uint8Array(to_arr);
-        for (let i = 0; i < length; i++) {
-            to[to_start_idx + i] = from[from_start_idx + i];
+        let len_from = from.length - from_idx;
+        let len_to = to.length - to_idx;
+        if (len > len_from || len > len_to) {
+            if (good_mode) {
+                len = Math.min(len_from, len_to);
+            } else {
+                throw new Error("Array_Copy越界");
+            }
+        }
+        for (let i = 0; i < len; i++) {
+            to[to_idx + i] = from[from_idx + i];
         }
     }
 }
@@ -168,7 +166,7 @@ class Matrix4x4 {
         }
     }
 
-    transpose_self(out4x4) {
+    transpose_self() {
 
         let d = this.__data;
         let temp = 0;
@@ -230,25 +228,27 @@ class Matrix4x4 {
 
     to_identity() {
 
-        this.data[0] = 1.0;
-        this.data[1] = 0.0;
-        this.data[2] = 0.0;
-        this.data[3] = 0.0;
+        let o = this.__data;
 
-        this.data[4] = 0.0;
-        this.data[5] = 1.0;
-        this.data[6] = 0.0;
-        this.data[7] = 0.0;
+        o[0] = 1.0;
+        o[1] = 0.0;
+        o[2] = 0.0;
+        o[3] = 0.0;
 
-        this.data[8] = 0.0;
-        this.data[9] = 0.0;
-        this.data[10] = 1.0;
-        this.data[11] = 0.0;
+        o[4] = 0.0;
+        o[5] = 1.0;
+        o[6] = 0.0;
+        o[7] = 0.0;
 
-        this.data[12] = 0.0;
-        this.data[13] = 0.0;
-        this.data[14] = 0.0;
-        this.data[15] = 1.0;
+        o[8] = 0.0;
+        o[9] = 0.0;
+        o[10] = 1.0;
+        o[11] = 0.0;
+
+        o[12] = 0.0;
+        o[13] = 0.0;
+        o[14] = 0.0;
+        o[15] = 1.0;
     }
 
     inverse_z() {
@@ -261,7 +261,7 @@ class Matrix4x4 {
     clear_and_init_with_orthogonal(width, height, near, far) {
 
         let o = this.__data;
-        
+
         o[0] = 2.0 / width;
         o[1] = 0.0;
         o[2] = 0.0;
@@ -364,6 +364,9 @@ class Quaternion {
         this.x /= mag;
         this.y /= mag;
         this.z /= mag;
+        if (Number.isNaN(this.x) || Number.isNaN(this.y) || Number.isNaN(this.z)) {
+            throw new Error("非法的转子四元数: 四元数虚部为NaN, 可能是由于旋转轴的模长为0");
+        }
     }
 
     become_point_quaternion(x, y, z) {
@@ -438,11 +441,11 @@ class Transform {
 
     __transform_mat = new Matrix4x4();
 
-    __rotation = {x: 0, y: 0, z: 0};
-    __scale = {x: 1.0, y: 1.0, z: 1.0};
-    __translation = {x: 0, y: 0, z: 0};
+    __scale = new Float32Array(3);
+    __rotation = new Float32Array(3);
+    __translation = new Float32Array(3);
 
-    __need_update = false;
+    __need_update = true;
 
     static __Update_Matrix_Cached = {
         axis_vec: new Vector4(),
@@ -450,38 +453,59 @@ class Transform {
         result_vec: new Vector4()
     };
 
-    set_rotation(x, y, z) {
+    constructor() {
 
-        this.__rotation.x = x;
-        this.__rotation.y = y;
-        this.__rotation.z = z;
-        this.__need_update = true;
+        this.__scale[0] = 1.0;
+        this.__scale[1] = 1.0;
+        this.__scale[2] = 1.0;
+
+        this.__rotation[0] = 0.0;
+        this.__rotation[1] = 0.0;
+        this.__rotation[2] = 0.0;
+
+        this.__translation[0] = 0.0;
+        this.__translation[1] = 0.0;
+        this.__translation[2] = 0.0;
     }
 
     set_scale(x, y, z) {
 
-        this.__scale.x = x;
-        this.__scale.y = y;
-        this.__scale.z = z;
+        this.__scale[0] = x;
+        this.__scale[1] = y;
+        this.__scale[2] = z;
+        this.__need_update = true;
+    }
+
+    set_rotation(x, y, z) {
+
+        this.__rotation[0] = x;
+        this.__rotation[1] = y;
+        this.__rotation[2] = z;
         this.__need_update = true;
     }
 
     set_translation(x, y, z) {
 
-        this.__translation.x = x;
-        this.__translation.y = y;
-        this.__translation.z = z;
+        this.__translation[0] = x;
+        this.__translation[1] = y;
+        this.__translation[2] = z;
         this.__need_update = true;
     }
 
-    __update_inner_matrix() {
+    need_update() {
+
+        return this.__need_update;
+    }
+
+    update_transform_matrix() {
 
         if (this.__need_update) {
+            this.__need_update = false;
             //先缩放，再旋转
             this.__transform_mat.to_identity();
-            this.__transform_mat.data[0] = this.__scale.x;
-            this.__transform_mat.data[5] = this.__scale.y;
-            this.__transform_mat.data[10] = this.__scale.z;
+            this.__transform_mat.data[0] = this.__scale[0];
+            this.__transform_mat.data[5] = this.__scale[1];
+            this.__transform_mat.data[10] = this.__scale[2];
             //绕y旋转xz
             Transform.__Update_Matrix_Cached.axis_vec.data[0] = this.__transform_mat.data[4];
             Transform.__Update_Matrix_Cached.axis_vec.data[1] = this.__transform_mat.data[5];
@@ -490,7 +514,7 @@ class Transform {
             Transform.__Update_Matrix_Cached.point_vec.data[0] = this.__transform_mat.data[0];
             Transform.__Update_Matrix_Cached.point_vec.data[1] = this.__transform_mat.data[1];
             Transform.__Update_Matrix_Cached.point_vec.data[2] = this.__transform_mat.data[2];
-            Quaternion.Rotate_vector(Transform.__Update_Matrix_Cached.axis_vec, Transform.__Update_Matrix_Cached.point_vec, this.__rotation.y, Transform.__Update_Matrix_Cached.result_vec);
+            Quaternion.Rotate_vector(Transform.__Update_Matrix_Cached.axis_vec, Transform.__Update_Matrix_Cached.point_vec, this.__rotation[1], Transform.__Update_Matrix_Cached.result_vec);
             this.__transform_mat.data[0] = Transform.__Update_Matrix_Cached.result_vec.data[0];
             this.__transform_mat.data[1] = Transform.__Update_Matrix_Cached.result_vec.data[1];
             this.__transform_mat.data[2] = Transform.__Update_Matrix_Cached.result_vec.data[2];
@@ -498,7 +522,7 @@ class Transform {
             Transform.__Update_Matrix_Cached.point_vec.data[0] = this.__transform_mat.data[8];
             Transform.__Update_Matrix_Cached.point_vec.data[1] = this.__transform_mat.data[9];
             Transform.__Update_Matrix_Cached.point_vec.data[2] = this.__transform_mat.data[10];
-            Quaternion.Rotate_vector(Transform.__Update_Matrix_Cached.axis_vec, Transform.__Update_Matrix_Cached.point_vec, this.__rotation.y, Transform.__Update_Matrix_Cached.result_vec);
+            Quaternion.Rotate_vector(Transform.__Update_Matrix_Cached.axis_vec, Transform.__Update_Matrix_Cached.point_vec, this.__rotation[1], Transform.__Update_Matrix_Cached.result_vec);
             this.__transform_mat.data[8] = Transform.__Update_Matrix_Cached.result_vec.data[0];
             this.__transform_mat.data[9] = Transform.__Update_Matrix_Cached.result_vec.data[1];
             this.__transform_mat.data[10] = Transform.__Update_Matrix_Cached.result_vec.data[2];
@@ -510,7 +534,7 @@ class Transform {
             Transform.__Update_Matrix_Cached.point_vec.data[0] = this.__transform_mat.data[4];
             Transform.__Update_Matrix_Cached.point_vec.data[1] = this.__transform_mat.data[5];
             Transform.__Update_Matrix_Cached.point_vec.data[2] = this.__transform_mat.data[6];
-            Quaternion.Rotate_vector(Transform.__Update_Matrix_Cached.axis_vec, Transform.__Update_Matrix_Cached.point_vec, this.__rotation.x, Transform.__Update_Matrix_Cached.result_vec);
+            Quaternion.Rotate_vector(Transform.__Update_Matrix_Cached.axis_vec, Transform.__Update_Matrix_Cached.point_vec, this.__rotation[0], Transform.__Update_Matrix_Cached.result_vec);
             this.__transform_mat.data[4] = Transform.__Update_Matrix_Cached.result_vec.data[0];
             this.__transform_mat.data[5] = Transform.__Update_Matrix_Cached.result_vec.data[1];
             this.__transform_mat.data[6] = Transform.__Update_Matrix_Cached.result_vec.data[2];
@@ -518,7 +542,7 @@ class Transform {
             Transform.__Update_Matrix_Cached.point_vec.data[0] = this.__transform_mat.data[8];
             Transform.__Update_Matrix_Cached.point_vec.data[1] = this.__transform_mat.data[9];
             Transform.__Update_Matrix_Cached.point_vec.data[2] = this.__transform_mat.data[10];
-            Quaternion.Rotate_vector(Transform.__Update_Matrix_Cached.axis_vec, Transform.__Update_Matrix_Cached.point_vec, this.__rotation.x, Transform.__Update_Matrix_Cached.result_vec);
+            Quaternion.Rotate_vector(Transform.__Update_Matrix_Cached.axis_vec, Transform.__Update_Matrix_Cached.point_vec, this.__rotation[0], Transform.__Update_Matrix_Cached.result_vec);
             this.__transform_mat.data[8] = Transform.__Update_Matrix_Cached.result_vec.data[0];
             this.__transform_mat.data[9] = Transform.__Update_Matrix_Cached.result_vec.data[1];
             this.__transform_mat.data[10] = Transform.__Update_Matrix_Cached.result_vec.data[2];
@@ -530,7 +554,7 @@ class Transform {
             Transform.__Update_Matrix_Cached.point_vec.data[0] = this.__transform_mat.data[0];
             Transform.__Update_Matrix_Cached.point_vec.data[1] = this.__transform_mat.data[1];
             Transform.__Update_Matrix_Cached.point_vec.data[2] = this.__transform_mat.data[2];
-            Quaternion.Rotate_vector(Transform.__Update_Matrix_Cached.axis_vec, Transform.__Update_Matrix_Cached.point_vec, this.__rotation.z, Transform.__Update_Matrix_Cached.result_vec);
+            Quaternion.Rotate_vector(Transform.__Update_Matrix_Cached.axis_vec, Transform.__Update_Matrix_Cached.point_vec, this.__rotation[2], Transform.__Update_Matrix_Cached.result_vec);
             this.__transform_mat.data[0] = Transform.__Update_Matrix_Cached.result_vec.data[0];
             this.__transform_mat.data[1] = Transform.__Update_Matrix_Cached.result_vec.data[1];
             this.__transform_mat.data[2] = Transform.__Update_Matrix_Cached.result_vec.data[2];
@@ -538,14 +562,14 @@ class Transform {
             Transform.__Update_Matrix_Cached.point_vec.data[0] = this.__transform_mat.data[4];
             Transform.__Update_Matrix_Cached.point_vec.data[1] = this.__transform_mat.data[5];
             Transform.__Update_Matrix_Cached.point_vec.data[2] = this.__transform_mat.data[6];
-            Quaternion.Rotate_vector(Transform.__Update_Matrix_Cached.axis_vec, Transform.__Update_Matrix_Cached.point_vec, this.__rotation.z, Transform.__Update_Matrix_Cached.result_vec);
+            Quaternion.Rotate_vector(Transform.__Update_Matrix_Cached.axis_vec, Transform.__Update_Matrix_Cached.point_vec, this.__rotation[2], Transform.__Update_Matrix_Cached.result_vec);
             this.__transform_mat.data[4] = Transform.__Update_Matrix_Cached.result_vec.data[0];
             this.__transform_mat.data[5] = Transform.__Update_Matrix_Cached.result_vec.data[1];
             this.__transform_mat.data[6] = Transform.__Update_Matrix_Cached.result_vec.data[2];
             //再平移
-            this.__transform_mat.data[12] = this.__translation.x;
-            this.__transform_mat.data[13] = this.__translation.y;
-            this.__transform_mat.data[14] = this.__translation.z;
+            this.__transform_mat.data[12] = this.__translation[0];
+            this.__transform_mat.data[13] = this.__translation[1];
+            this.__transform_mat.data[14] = this.__translation[2];
         }
     }
 }
@@ -559,6 +583,7 @@ class Array_Buffer_Desc {
     __offset_cnt = null;
 
     constructor(elem_type, elem_cnt_per_stride, whether_normalize, stride_cnt, offset_cnt) {
+
         this.__elem_type = elem_type;
         this.__elem_cnt_per_stride = elem_cnt_per_stride;
         this.__whether_normalize = whether_normalize;
@@ -657,6 +682,14 @@ class __Mesh {
 
 class SL_Type {
 
+    static get FLOAT32_CNT() {
+        return 0;
+    }
+
+    get data() {
+        return null;
+    }
+
     copy_from(float32) {
 
     }
@@ -673,11 +706,18 @@ class SL_Type {
  */
 class SL_Type_Float {
 
-    data = new Float32Array(1);
+    __data = new Float32Array(1);
+
+    static get FLOAT32_CNT() {
+        return 1;
+    }
+
+    get data() {
+        return this.__data;
+    }
 
     copy_from(float32, from_start) {
-
-        SL_Type.Copy_Float32(float32, from_start, this.data, 0, this.data.length);
+        SL_Type.Copy_Float32(float32, from_start, this.__data, 0, this.__data.length);
     }
 }
 
@@ -686,11 +726,18 @@ class SL_Type_Float {
  */
 class SL_Type_Vec4 {
 
-    data = new Float32Array(4);
+    __data = new Float32Array(4);
+
+    static get FLOAT32_CNT() {
+        return 4;
+    }
+
+    get data() {
+        return this.__data;
+    }
 
     copy_from(float32, from_start) {
-
-        SL_Type.Copy_Float32(float32, from_start, this.data, 0, this.data.length);
+        SL_Type.Copy_Float32(float32, from_start, this.__data, 0, this.__data.length);
     }
 }
 
@@ -699,22 +746,53 @@ class SL_Type_Vec4 {
  */
 class SL_Type_Mat4 {
 
-    data = new Float32Array(16);
+    __data = new Float32Array(16);
+
+    static get FLOAT32_CNT() {
+        return 16;
+    }
+
+    get data() {
+        return this.__data;
+    }
 
     copy_from(float32_from, from_start) {
-
-        SL_Type.Copy_Float32(float32_from, from_start, this.data, 0, this.data.length);
+        SL_Type.Copy_Float32(float32_from, from_start, this.__data, 0, this.__data.length);
     }
 }
 
 class Program_Ctx {
 
-    vs = null;
-    fs = null;
-    program = null;
-    per_vertex_attr_location_map = new Map();
-    uniform_location_map = new Map();
-    per_instance_attr_location_map = new Map();
+    __webgl2_vs = null;
+    __webgl2_fs = null;
+    __webgl2_program = null;
+    __per_vertex_attr_location_map = new Map();
+    __uniform_location_map = new Map();
+    __per_instance_attr_location_map = new Map();
+
+    get vs() {
+        return this.__webgl2_vs;
+    }
+
+    get fs() {
+        return this.__webgl2_fs;
+    }
+
+    get program() {
+        return this.__webgl2_program;
+    }
+
+    get per_vertex_attr_location_map() {
+        return this.__per_vertex_attr_location_map;
+    }
+
+    get uniform_location_map() {
+        return this.__uniform_location_map;
+    }
+
+    get per_instance_attr_location_map() {
+        return this.__per_instance_attr_location_map;
+    }
 }
 
 class Material {
@@ -725,9 +803,17 @@ class Material {
     //使用的网格
     __mesh_used = null;
     //使用的纹理
-    __textures_used_map = new Map();
+    __texture_used_map = new Map();
     //使用的uniform
     __uniform_data_map = new Map();
+
+    __pipeline_settings = {
+        culling: {
+            is_enabled: true,
+            front_face: WebGL2RenderingContext.CW,
+            cull_face: WebGL2RenderingContext.BACK
+        }
+    }
 
     constructor(s3r) {
 
@@ -768,6 +854,26 @@ class Material {
 
         this.__uniform_data_map.get(name).copy_from(float32_arr, from_idx);
     }
+
+    get s3r_belongs_to() {
+        return this.__s3r_belongs_to;
+    }
+
+    get program_ctx_used() {
+        return this.__program_ctx_used;
+    }
+
+    get mesh_used() {
+        return this.__mesh_used;
+    }
+
+    get texture_used_map() {
+        return this.__texture_used_map;
+    }
+
+    get uniform_data_map() {
+        return this.__uniform_data_map;
+    }
 }
 
 class Graphics_obj extends Transform {
@@ -779,7 +885,7 @@ class Graphics_obj extends Transform {
 
     __material = null;
 
-    __temp_sl_type = new SL_Type_Mat4();
+    __temp_sl_mat4 = new SL_Type_Mat4();
 
     constructor(s3r_belongs_to, parent_graphics_object) {
 
@@ -793,43 +899,9 @@ class Graphics_obj extends Transform {
         this.__material = new Material(s3r_belongs_to);
     }
 
-    get_material() {
+    material() {
 
         return this.__material;
-    }
-
-    setup_shader_and_data() {
-
-        this.__material.__s3r_belongs_to.setup_program(this.__material.__program_ctx_used.program);
-        //set index buffer
-        if (this.__material.__mesh_used.has_idx_buffer) {
-            this.__material.__s3r_belongs_to.bind_global_idx_buffer(this.__material.__mesh_used.gpu_idx_buffer);
-        }
-        //设置每顶点
-        for (let per_vertex_attr_location_kv of this.__material.__program_ctx_used.per_vertex_attr_location_map) {
-            if (this.__material.__mesh_used.attr_map.has(per_vertex_attr_location_kv[0])) {
-                let mesh_attr = this.__material.__mesh_used.attr_map.get(per_vertex_attr_location_kv[0]);
-                if (mesh_attr.buffer_desc.can_fit_into(per_vertex_attr_location_kv[1].buffer_desc) === false) {
-                    throw Error("每顶点属性" + per_vertex_attr_location_kv[0] + "格式不兼容");
-                }
-                this.__material.__s3r_belongs_to.setup_per_vertex_data(per_vertex_attr_location_kv[1].location, mesh_attr);
-            }
-        }
-        //设置uniform
-        for (let uniform_location_kv of this.__material.__program_ctx_used.uniform_location_map) {
-            if (this.__material.__uniform_data_map.has(uniform_location_kv[0])) {
-                if (uniform_location_kv[0] === "s3r_u_mat4_m") {
-                    this.__temp_sl_type.copy_from(this.__transform_mat.data, 0);
-                    this.__material.__s3r_belongs_to.setup_uniform_data(uniform_location_kv[1].location, this.__temp_sl_type);
-                } else {
-                    let uniform_data = this.__material.__uniform_data_map.get(uniform_location_kv[0]);
-                    if (uniform_data.data_type !== uniform_location_kv.data_type) {
-                        throw Error("Uniform属性" + uniform_location_kv[0] + "格式不兼容");
-                    }
-                    this.__material.__s3r_belongs_to.setup_uniform_data(uniform_location_kv[1].location, uniform_data);
-                }
-            }
-        }
     }
 
     push_instance_data_to_data_arr(arr_map) {
@@ -856,39 +928,44 @@ class Simple_3D_Renderer {
         clear_depth: 0
     };
 
-    Constants = {
+    static Constants = {
 
         get CLEAR_COLOR_BUFFER() {
             return 0b00000001;
         },
         get CLEAR_DEPTH_BUFFER() {
-
             return 0b00000010;
+        },
+        get VERTEX_SHADER() {
+            return 0;
+        },
+        get FRAGMENT_SHADER() {
+            return 1;
         }
     };
 
     create_program_ctx(ctx_name, vs_code, fs_code, attr_desc) {
 
         let ctx = new Program_Ctx();
-        ctx.vs = this.create_shader(vs_code, this.__gl.VERTEX_SHADER);
-        ctx.fs = this.create_shader(fs_code, this.__gl.FRAGMENT_SHADER);
-        ctx.program = this.create_program(ctx.vs, ctx.fs);
+        ctx.__webgl2_vs = this.create_webgl2_shader(vs_code, Simple_3D_Renderer.Constants.VERTEX_SHADER);
+        ctx.__webgl2_fs = this.create_webgl2_shader(fs_code, Simple_3D_Renderer.Constants.FRAGMENT_SHADER);
+        ctx.__webgl2_program = this.create_webgl2_program(ctx.__webgl2_vs, ctx.__webgl2_fs);
 
         for (let attr_name in attr_desc.per_vertex) {
-            ctx.per_vertex_attr_location_map.set(
+            ctx.__per_vertex_attr_location_map.set(
                 attr_name,
                 {
-                    location: this.__gl.getAttribLocation(ctx.program, attr_name),
+                    location: this.__gl.getAttribLocation(ctx.__webgl2_program, attr_name),
                     buffer_desc: attr_desc.per_vertex[attr_name]
                 }
             );
         }
 
         for (let attr_name in attr_desc.uniform) {
-            ctx.uniform_location_map.set(
+            ctx.__uniform_location_map.set(
                 attr_name,
                 {
-                    location: this.__gl.getUniformLocation(ctx.program, attr_name),
+                    location: this.__gl.getUniformLocation(ctx.__webgl2_program, attr_name),
                     data_type: attr_desc.uniform[attr_name]
                 }
             );
@@ -1050,27 +1127,73 @@ class Simple_3D_Renderer {
         }
     }
 
-    setup_render_state(is_clear, go) {
+    setup_render_state(go) {
 
-        this.__gl.enable(this.__gl.CULL_FACE);
-        this.__gl.frontFace(this.__gl.CW);
-        this.__gl.cullFace(this.__gl.BACK);
+        let material = go.material();
+        let pipeline = material.__pipeline_settings;
 
-        this.__gl.enable(this.__gl.DEPTH_TEST);
-        this.__gl.depthFunc(this.__gl.LESS);
+        this.__gl.useProgram(material.__program_ctx_used.__webgl2_program);
+
+        if (pipeline.culling.is_enabled) {
+            this.__gl.enable(WebGL2RenderingContext.CULL_FACE);
+            this.__gl.frontFace(pipeline.culling.front_face);
+            this.__gl.cullFace(pipeline.culling.cull_face);
+        } else {
+            this.__gl.enable();
+        }
+
+        this.__gl.enable(WebGL2RenderingContext.DEPTH_TEST);
+        this.__gl.depthFunc(WebGL2RenderingContext.LESS);
 
         this.__gl.viewport(0, 0, this.__cvs.width, this.__cvs.height);
+
+        this.setup_shader_data(go);
+    }
+
+    setup_shader_data(go) {
+
+        let material = go.material();
+        //set index buffer
+        if (material.__mesh_used.has_idx_buffer) {
+            material.__s3r_belongs_to.bind_global_idx_buffer(material.__mesh_used.gpu_idx_buffer);
+        }
+        //设置每顶点
+        for (let per_vertex_attr_location_kv of material.__program_ctx_used.__per_vertex_attr_location_map) {
+            if (material.__mesh_used.attr_map.has(per_vertex_attr_location_kv[0])) {
+                let mesh_attr = material.__mesh_used.attr_map.get(per_vertex_attr_location_kv[0]);
+                if (mesh_attr.buffer_desc.can_fit_into(per_vertex_attr_location_kv[1].buffer_desc) === false) {
+                    throw Error("每顶点属性" + per_vertex_attr_location_kv[0] + "格式不兼容");
+                }
+                material.__s3r_belongs_to.setup_per_vertex_data(per_vertex_attr_location_kv[1].location, mesh_attr);
+            }
+        }
+        //设置uniform
+        for (let uniform_location_kv of material.__program_ctx_used.__uniform_location_map) {
+            if (material.__uniform_data_map.has(uniform_location_kv[0])) {
+                if (uniform_location_kv[0] === "s3r_u_mat4_m") {
+                    go.update_transform_matrix();
+                    go.__temp_sl_mat4.copy_from(go.__transform_mat.data, 0);
+                    material.__s3r_belongs_to.upload_uniform_with_sl_type_instance(uniform_location_kv[1].location, go.__temp_sl_mat4);
+                } else {
+                    let uniform_data = material.__uniform_data_map.get(uniform_location_kv[0]);
+                    if (uniform_data.data_type !== uniform_location_kv.data_type) {
+                        throw Error("Uniform属性" + uniform_location_kv[0] + "格式不兼容");
+                    }
+                    material.__s3r_belongs_to.upload_uniform_with_sl_type_instance(uniform_location_kv[1].location, uniform_data);
+                }
+            }
+        }
     }
 
     set_clear_flag(clear_flag) {
 
         let final = 0;
 
-        if (Simple_3D_Renderer.Constants.CLEAR_COLOR_BUFFER & clear_flag === 1) {
+        if (Simple_3D_Renderer.Constants.CLEAR_COLOR_BUFFER && clear_flag === 1) {
             final |= this.__gl.COLOR_BUFFER_BIT;
         }
 
-        if (Simple_3D_Renderer.Constants.CLEAR_DEPTH_BUFFER & clear_flag === 1) {
+        if (Simple_3D_Renderer.Constants.CLEAR_DEPTH_BUFFER && clear_flag === 1) {
             final |= this.__gl.DEPTH_BUFFER_BIT;
         }
 
@@ -1104,10 +1227,10 @@ class Simple_3D_Renderer {
 
     render(go) {
 
-        if (go.get_material().__mesh_used.has_idx_buffer) {
+        if (go.material().__mesh_used.has_idx_buffer) {
             this.__gl.drawElements(
                 this.__gl.TRIANGLES,
-                go.get_material().__mesh_used.vertex_or_idx_cnt,
+                go.material().__mesh_used.vertex_or_idx_cnt,
                 this.__gl.UNSIGNED_SHORT,
                 0
             );
@@ -1115,7 +1238,7 @@ class Simple_3D_Renderer {
             this.__gl.drawArrays(
                 this.__gl.TRIANGLES,
                 0,
-                go.get_material().__mesh_used.vertex_or_idx_cnt,
+                go.material().__mesh_used.vertex_or_idx_cnt,
             );
         }
     }
@@ -1164,13 +1287,25 @@ class Simple_3D_Renderer {
         }
     }
 
-    setup_uniform_data(location, sl_type_instance) {
+    upload_uniform_with_sl_type_instance(location, sl_type_instance) {
+
         if (sl_type_instance instanceof SL_Type_Float) {
             this.__gl.uniform1fv(location, sl_type_instance.data);
         } else if (sl_type_instance instanceof SL_Type_Vec4) {
             this.__gl.uniform4fv(location, sl_type_instance.data);
         } else if (sl_type_instance instanceof SL_Type_Mat4) {
             this.__gl.uniformMatrix4fv(location, false, sl_type_instance.data);
+        }
+    }
+
+    upload_uniform_with_arr(location, sl_type, float32_arr, from) {
+
+        if (Object.is(sl_type, SL_Type_Float)) {
+            this.__gl.uniform1fv(location, float32_arr, from, sl_type.FLOAT32_CNT);
+        } else if (Object.is(sl_type, SL_Type_Vec4)) {
+            this.__gl.uniform4fv(location, float32_arr, from, sl_type.FLOAT32_CNT);
+        } else if (Object.is(sl_type, SL_Type_Mat4)) {
+            this.__gl.uniformMatrix4fv(location, false, float32_arr, from, sl_type.FLOAT32_CNT);
         }
     }
 
@@ -1188,8 +1323,13 @@ class Simple_3D_Renderer {
         this.__gl.useProgram(program);
     }
 
-    create_shader(shader_code, shader_type) {
+    create_webgl2_shader(shader_code, shader_type) {
 
+        if (shader_type === Simple_3D_Renderer.Constants.VERTEX_SHADER) {
+            shader_type = this.__gl.VERTEX_SHADER;
+        } else if (shader_type === Simple_3D_Renderer.Constants.FRAGMENT_SHADER) {
+            shader_type = this.__gl.FRAGMENT_SHADER;
+        }
         let shader = this.__gl.createShader(shader_type);
         this.__gl.shaderSource(shader, shader_code);
         this.__gl.compileShader(shader);
@@ -1204,7 +1344,7 @@ class Simple_3D_Renderer {
         }
     }
 
-    create_program(vs, fs) {
+    create_webgl2_program(vs, fs) {
 
         let program = this.__gl.createProgram();
         this.__gl.attachShader(program, vs);
@@ -1224,21 +1364,6 @@ class Simple_3D_Renderer {
 
         this.__gl.bindBuffer(this.__gl.ARRAY_BUFFER, gpu_buffer);
         this.__gl.bufferData(this.__gl.ARRAY_BUFFER, new_size_bytes, usage);
-    }
-
-    /**
-     * all arguments express in bytes
-     * @param cpu_buffer
-     * @param cpu_from
-     * @param gpu_buffer
-     * @param gpu_from
-     * @param length
-     */
-    upload_cpu_to_gpu(cpu_buffer, cpu_from, gpu_buffer, gpu_from, length) {
-
-        this.__gl.bindBuffer(this.__gl.ARRAY_BUFFER, gpu_buffer);
-        let a = new Uint8Array(cpu_buffer);
-        this.__gl.bufferSubData(this.__gl.ARRAY_BUFFER, gpu_from, a, cpu_from, length);
     }
 
     get_mesh(mesh_name) {
